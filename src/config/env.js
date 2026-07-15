@@ -9,7 +9,8 @@ const schema = z.object({
   PORT: z.coerce.number().int().positive().default(8080),
   MONGODB_URI: z.string().min(1, 'MONGODB_URI is required'),
   JWT_SECRET: z.string().min(16, 'JWT_SECRET must be at least 16 characters'),
-  JWT_EXPIRES_IN: z.string().default('1h'),
+  // Access-token lifetime. Spec auth.spec.md R-3 pins this at 15 minutes.
+  JWT_EXPIRES_IN: z.string().default('15m'),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
 });
 
