@@ -1,0 +1,83 @@
+name: AI review
+
+# Advisory. Posts a review comment on the PR; never blocks merge.
+# See docs/ai-sdlc.md -> "CI/CD pipeline" for why this exists alongside ci.yml.
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+concurrency:
+  group: ai-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    name: Claude review
+    runs-on: ubuntu-latest
+
+    steps:
+      # Secrets are not exposed to workflows triggered from forked repos, so the
+      # key is legitimately absent on fork PRs. That is a configuration fact, not
+      # a defect in the PR — skip loudly, exit 0.
+      - name: Check for API key
+        id: guard
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::notice title=AI review skipped::No ANTHROPIC_API_KEY secret is available to this run. Fork PRs do not receive secrets; for same-repo PRs, add the secret under Settings -> Secrets and variables -> Actions."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out (full history)
+        if: steps.guard.outputs.enabled == 'true'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node
+        if: steps.guard.outputs.enabled == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        if: steps.guard.outputs.enabled == 'true'
+        run: npm ci
+
+      # base...head = changes introduced by this PR, excluding anything that
+      # landed on the base branch since it was cut.
+      - name: Compute PR diff
+        if: steps.guard.outputs.enabled == 'true'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git diff "$BASE_SHA...$HEAD_SHA" -- . ':(exclude)package-lock.json' > /tmp/pr.diff
+          echo "Diff size: $(wc -c < /tmp/pr.diff) bytes"
+
+      # continue-on-error: an Anthropic outage annotates the run but must not gate
+      # the PR. This review is advisory; ci.yml is the gate.
+      - name: Request review
+        id: review
+        if: steps.guard.outputs.enabled == 'true'
+        continue-on-error: true
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: node .github/scripts/ai-review.mjs /tmp/pr.diff /tmp/review.md
+
+      - name: Post review comment
+        if: steps.guard.outputs.enabled == 'true' && steps.review.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: gh pr comment "$PR_NUMBER" --body-file /tmp/review.md
