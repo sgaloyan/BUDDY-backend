@@ -1,9 +1,9 @@
 # Spec: Email/Password Authentication
 
-> **Status:** Draft
+> **Status:** Implemented
 > **Slice:** Slice 1 — Auth (signup + login + refresh)
 > **Owner:** Stepan
-> **Last updated:** 2026-07-15 (rev 2 — post-review fixes: unique-index enforcement, password max length, malformed-JSON handling, refresh-token TTL)
+> **Last updated:** 2026-07-16 (rev 3 — status set to `Implemented`; shipped in `b031f3a`, code and tests conform. This spec never passed through `Approved` — see "Known process drift" in [`docs/ai-sdlc.md`](../docs/ai-sdlc.md).)
 
 This spec is the **source of truth**. Code and tests must conform to it. If reality
 must diverge, change the spec first, then the code.
