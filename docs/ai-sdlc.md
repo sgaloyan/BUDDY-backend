@@ -21,6 +21,12 @@ For each vertical slice:
 1. **Write the spec** — copy `specs/_template.spec.md` to `specs/<feature>.spec.md` and
    fill in data model, API contract, validation, business rules, and acceptance criteria.
 2. **Review & approve the spec** together. Set status to `Approved`.
+
+   > **Gate — check this before writing a line of code.** Open the spec and confirm it
+   > literally reads `Status: Approved`. `Draft` means implementation has not been
+   > authorized to start, whoever or whatever is doing the writing. This is one `grep`,
+   > and skipping it is exactly how slice 1 drifted (see below).
+
 3. **Derive tests from the acceptance criteria** — each checklist item becomes at least
    one test in `test/` (`node --test`). Tests encode the spec, so they can be written
    before or alongside the implementation.
@@ -28,6 +34,16 @@ For each vertical slice:
    to satisfy the spec and make the tests green.
 5. **Verify against the spec** — run `npm test` and re-read the spec's acceptance
    criteria to confirm every item is covered. Update status to `Implemented`.
+
+**Planned check (not built yet — a future slice).** The status gate above is currently
+honor-system, and honor-system checks are precisely the kind that fail quietly. The
+intended automation: a CI step (or pre-commit hook) that, for every `specs/*.spec.md`
+touched by a PR, reads the `Status:` field and fails when a spec still marked `Draft`
+ships alongside implementation code under `src/`. Roughly: if the diff touches `src/`
+and the corresponding spec is not `Approved` or `Implemented`, the build goes red with a
+message naming the spec. Cheap to write, and it converts a rule we have to remember into
+one we cannot forget. Deliberately deferred — it deserves its own spec and slice rather
+than being bolted onto the CI/CD work.
 
 ## Layering rules
 
@@ -100,7 +116,81 @@ The two are complements, not substitutes. Tests are a gate because they are
 deterministic; AI review is advisory because it is not. Neither one replaces a human
 approving the PR.
 
+### Failure mode: the silent empty review
+
+The first live run of `ai-review.yml` posted a review with a correct header, a correct
+footer, and **nothing in between**. It did not error. To a reader skimming the PR it was
+indistinguishable from "the reviewer found nothing" — a hollow pass.
+
+The cause was the token budget. The request set `max_tokens: 16000` together with
+`thinking: { type: 'adaptive' }`, and **thinking tokens are drawn from the same
+`max_tokens` budget as the visible answer**. On a large diff the model spent the entire
+budget reasoning and was cut off before emitting a single text block. The API returned
+`stop_reason: "max_tokens"` and `content: [{ type: "thinking" }]` with no text block, so
+the script extracted the empty string and wrote it out verbatim.
+
+Three mitigations, in order of importance:
+
+1. **A degraded run must announce itself.** This was the real defect — not the
+   truncation, but that the truncation was invisible. The script now inspects
+   `stop_reason` and the presence of a text block, and prepends a loud
+   `⚠️ Review incomplete` banner when either indicates a problem. It never emits a bare
+   header and footer. **An AI reviewer that fails silently is worse than none**, because
+   a hollow pass reads as a clean one and quietly buys false confidence.
+2. **Thinking gets an explicit, separate budget.** `thinking.budget_tokens` is now set
+   explicitly and `max_tokens` is set well above it, so the visible answer always has
+   room reserved that thinking cannot consume. See `.github/scripts/ai-review.mjs` for
+   the numbers and the tradeoff.
+3. **The diff is capped.** Input size was never near the context limit — the real
+   pressure a big diff creates is _more thinking_, which is what starves the text
+   budget. The script caps the diff at a threshold, drops whole files rather than cutting
+   mid-hunk, and names the omitted files in the output. A partial review says it is
+   partial.
+
+The general rule this leaves us with: **any degraded path in the pipeline must be
+visible in its output.** Silence must never be the same shape as success.
+
 ## Current status
 
 - [x] Project skeleton
-- [ ] Slice 1 — email/password auth (signup + login, bcrypt + JWT) — spec pending
+- [x] Slice 1 — email/password auth (signup + login + refresh, bcrypt + JWT). Spec:
+      [`specs/auth.spec.md`](../specs/auth.spec.md). Shipped in `b031f3a`; three defects
+      found by manual review and fixed (signup race, error-handler 500, bcrypt-72
+      truncation).
+- [x] CI/CD pipeline — `ci.yml` gate + `ai-review.yml` advisor, shipped in `6ffa904`.
+- [ ] Next slice — spec pending.
+
+## Known process drift: slice 1 skipped the status transitions
+
+Recorded deliberately rather than quietly corrected, because the failure is instructive.
+
+**What happened.** `specs/auth.spec.md` went from `Draft` straight to shipped. It was
+never marked `Approved` before implementation began, and was never marked `Implemented`
+when it merged in `b031f3a` — it simply sat at `Draft` while the code went to `main`.
+That breaks principle 1 ("no feature code until the spec is marked `Approved`") and step
+5 of the loop. It has since been set to `Implemented`, which is now accurate: the spec's
+content was always right and the code does conform to it. Only the status field had ever
+been wrong.
+
+**Why it matters more than a stale field.** The status field is the process's only
+machine-checkable claim about itself. When `Draft` can mean "shipped to production," the
+word stops carrying information, and the question it exists to answer — "has this been
+approved?" — silently becomes unanswerable. Nothing broke, which is the point: this is
+the kind of drift that costs nothing until the day it costs a lot.
+
+**How it surfaced.** Not from the code, which was fine, and not from the tests, which
+were green. It came out of the docs pass at the end of building the pipeline: writing
+down what had actually shipped forced a check of what the spec claimed, and the two
+disagreed. That is the same mechanism as the auth-slice defects, one level up — **a
+careful reader comparing an artifact against its contract.** Tests check code against
+the spec; nothing had been checking the spec against reality.
+
+**The lesson.** The process caught this, but only because a human-and-AI pass happened
+to look. That is not a control; that is luck with good habits. Hence the explicit gate
+in step 2 of the loop and the planned CI check described alongside it — turn the
+honor-system rule into an enforced one. A process that discovers its own drift is
+working. A process that cannot drift silently is better.
+
+The principle is the one the empty-review bug taught, turned on ourselves: **a degraded
+state must announce itself.** A spec sitting at `Draft` while its code runs in production
+is precisely a degraded state that stayed quiet.
