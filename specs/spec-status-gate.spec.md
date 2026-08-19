@@ -3,7 +3,7 @@
 > **Status:** Implemented
 > **Slice:** Slice 3 — Spec-status gate (process enforcement)
 > **Owner:** Stepan
-> **Last updated:** 2026-08-19 (rev 3 — implemented; 15 unit tests green plus an end-to-end CLI smoke test of all four exit paths. This spec is the first in the repo to pass Draft -> Approved -> Implemented in order.)
+> **Last updated:** 2026-08-19 (rev 4 — §4.1 corrected: error annotations go to stderr, not stdout as originally written. Found by the AI reviewer on PR #4; the code was right and the spec was wrong, so the spec changed.)
 
 This spec is the **source of truth**. Code and tests must conform to it. If reality
 must diverge, change the spec first, then the code.
@@ -78,7 +78,10 @@ Any changed path under `src/`. Nothing else. See §5, R-2 and R-4 for the ration
   | 1    | Violation: `src/` changed alongside a spec that is `Draft` or unparseable.     |
   | 2    | The check could not run (missing env, `git diff` failed). **Fails the build.** |
 
-- **Output:** GitHub Actions annotations on stdout.
+- **Output:** GitHub Actions annotations. The passing notice goes to **stdout**; error
+  annotations (both violations and `cannot run`) go to **stderr**, following the usual
+  stream convention. GitHub Actions parses workflow commands from both streams, so the
+  split is invisible to CI and matters only to anything that reads one stream alone.
   - Violation → `::error title=Spec not approved::<specs/x.spec.md> is <status> but this PR changes implementation code under src/. Approve the spec first (docs/ai-sdlc.md, step 2).`
     One error line **per offending spec**, so a PR touching two bad specs names both.
   - Pass → a `::notice` naming the specs checked and their statuses, so a passing run
