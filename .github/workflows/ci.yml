@@ -36,3 +36,31 @@ jobs:
 
       - name: Test
         run: npm test
+
+  spec-gate:
+    name: Spec status gate
+    # Pull requests only: the check compares base...head, which has no meaning on a bare
+    # push. Deliberately a separate job rather than a step in `build`, so a lint failure
+    # and a spec-status failure surface in the same run instead of one masking the other.
+    # See specs/spec-status-gate.spec.md.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # git plus the Node stdlib only — no npm install, no secrets, so this stays fast
+      # and works identically on fork PRs.
+      - name: Check spec statuses
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node .github/scripts/spec-status-gate.mjs
