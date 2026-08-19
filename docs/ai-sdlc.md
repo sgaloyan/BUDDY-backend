@@ -35,15 +35,12 @@ For each vertical slice:
 5. **Verify against the spec** — run `npm test` and re-read the spec's acceptance
    criteria to confirm every item is covered. Update status to `Implemented`.
 
-**Planned check (not built yet — a future slice).** The status gate above is currently
-honor-system, and honor-system checks are precisely the kind that fail quietly. The
-intended automation: a CI step (or pre-commit hook) that, for every `specs/*.spec.md`
-touched by a PR, reads the `Status:` field and fails when a spec still marked `Draft`
-ships alongside implementation code under `src/`. Roughly: if the diff touches `src/`
-and the corresponding spec is not `Approved` or `Implemented`, the build goes red with a
-message naming the spec. Cheap to write, and it converts a rule we have to remember into
-one we cannot forget. Deliberately deferred — it deserves its own spec and slice rather
-than being bolted onto the CI/CD work.
+**This gate is now enforced in CI.** It used to be honor-system, and honor-system checks
+are precisely the kind that fail quietly — which is exactly how slice 1 drifted. The
+`spec-gate` job in `ci.yml` now fails any PR that changes code under `src/` while a spec
+it touches is still `Draft` (or has an unreadable `Status:`), naming the offending spec.
+Spec: [`specs/spec-status-gate.spec.md`](../specs/spec-status-gate.spec.md); see
+"The spec-status gate" below for what it deliberately does _not_ catch.
 
 ## Layering rules
 
@@ -89,7 +86,31 @@ with a finding closes it. The workflow skips with a clear message when no
 withheld) rather than failing the build — a missing key is a configuration fact, not
 a defect in the PR.
 
-### Why both
+### `spec-gate` (in `ci.yml`) — the process gate
+
+The third check, and the only one that polices the process rather than the code. On every
+pull request it runs `.github/scripts/spec-status-gate.mjs`, which fails the build iff the
+PR changes something under `src/` **and** a spec it touches is not `Approved` or
+`Implemented`. It is a gate rather than an advisor for the same reason `ci.yml` is: the
+question "does this file say `Approved`?" has a deterministic answer.
+
+Three of its rules are deliberate holes, and each is load-bearing:
+
+- **Spec-only PRs always pass**, `Draft` included. Iterating on a draft is step 1 of the
+  loop; a gate that blocked it would be hostile to the process it enforces.
+- **`src/`-only PRs pass** when no spec is touched, because bugfixes to already-shipped
+  code legitimately touch no spec. The cost is real: brand-new code with _no_ spec at all
+  still slips through. Closing that needs a spec-to-code mapping, which is its own slice.
+- **`test/` is not implementation code**, since step 3 explicitly allows tests to be
+  written before the implementation they encode.
+
+What it does _not_ do is fail open. A missing `Status:` line, an unrecognized value, a
+missing `BASE_SHA`, a failing `git diff` — each exits non-zero with an annotation rather
+than passing quietly. That is the empty-review lesson turned on the gate itself: an
+enforcement check that cannot tell you it failed to run is worse than no check, because a
+green tick reads as compliance.
+
+### Why all three
 
 **Tests catch what the spec anticipated.** Every acceptance criterion becomes a test,
 so the suite is exactly as good as our foresight when we wrote the spec. That leaves a
@@ -158,7 +179,12 @@ visible in its output.** Silence must never be the same shape as success.
       found by manual review and fixed (signup race, error-handler 500, bcrypt-72
       truncation).
 - [x] CI/CD pipeline — `ci.yml` gate + `ai-review.yml` advisor, shipped in `6ffa904`.
-- [ ] Next slice — spec pending.
+- [x] Slice 3 — spec-status gate. Spec:
+      [`specs/spec-status-gate.spec.md`](../specs/spec-status-gate.spec.md). Closes the
+      honor-system hole that let slice 1 drift. First spec to run the loop in order:
+      `Draft` -> `Approved` (before any code) -> `Implemented`.
+- [ ] Next slice — spec pending. Invites is the obvious candidate: BUDDY is invite-only
+      and has no invites.
 
 ## Known process drift: slice 1 skipped the status transitions
 
